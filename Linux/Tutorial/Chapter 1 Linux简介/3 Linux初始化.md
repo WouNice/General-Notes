@@ -1,4 +1,4 @@
-# Linux初始化
+# Linux 初始化
 
 ## 文本字符界面详解
 
@@ -7,7 +7,7 @@
 - `~root`：当前登录的用户名。
 - `localhost`：当前系统的计算机名。
 - `~`：当前的工作路径位于用户的宿主目录下。
-- `# `：当前登录用户是管理员用户。如果显示的是`$`符号，则表示当前用户为普通用户。
+- `#`：当前登录用户是管理员用户。如果显示的是`$`符号，则表示当前用户为普通用户。
 
 ## 电源管理
 
@@ -16,10 +16,10 @@
 注销命令如下：
 
 ```shell
-# 使用exit命令注销
+# 使用 exit 命令注销
 exit
 
-# 使用logout命令注销
+# 使用 logout 命令注销
 logout
 ```
 
@@ -27,14 +27,16 @@ logout
 
 ### 重启命令
 
-在Linux系统中实现重启的命令如下：
+在 Linux 系统中实现重启的命令如下：
 
 ```shell
-# 使用shutdown命令
+# 使用 shutdown 命令
 shutdown -r now
-# 使用reboot命令
+
+# 使用 reboot 命令
 reboot
-# 使用init命令
+
+# 使用 init 命令
 init 6
 ```
 
@@ -43,22 +45,25 @@ init 6
 常用的关机命令如下：
 
 ```shell
-# 使用shutdown命令
+# 使用 shutdown 命令
 shutdown -h now
-# 使用poweroff命令
+
+# 使用 poweroff 命令
 poweroff
-# 使用init命令
+
+# 使用 init 命令
 init 0
-# 使用halt命令，关机时同时关闭电源
+
+# 使用 halt 命令，关机时同时关闭电源
 halt -p
 ```
 
 下面简单介绍以上命令的差异：
 
-- shutdown命令在关机的同时也会关闭电源，但是只有root用户才可以执行这个命令，普通用户需要root用户进行授权后才可以执行。
-- halt命令在关机时不会关闭电源，如果加上“-p”选项就可以在关机的同时也关闭电源。
-- poweroff命令在关机时也会关闭电源，其实“halt -p”就等同于poweroff命令。
-- init命令是CentOS 6以下发行版本使用的，init 0表示关机，init 6表示重启，在CentOS 7中可以兼容这种命令。
+- `shutdown`命令在关机的同时也会关闭电源，但是只有 root 用户才可以执行这个命令，普通用户需要 root 用户进行授权后才可以执行。
+- halt 命令在关机时不会关闭电源，如果加上“-p”选项就可以在关机的同时也关闭电源。
+- poweroff 命令在关机时也会关闭电源，其实“halt -p”就等同于 poweroff 命令。
+- init 命令是 CentOS 6 以下发行版本使用的，init 0 表示关机，init 6 表示重启，在 CentOS 7 中可以兼容这种命令。
 
 ### 定时关机命令
 
@@ -77,7 +82,8 @@ shutdown -c
 ## 查看系统信息
 
 ```shell
-#cat /etc/os-release
+# cat /etc/os-release
+
 NAME="Rocky Linux"
 VERSION="9.5 (Blue Onyx)"
 ID="rocky"
@@ -101,7 +107,7 @@ REDHAT_SUPPORT_PRODUCT_VERSION="9.5"
 
 ## 查看系统内核版本号和发行版本号
 
-Linux系统的版本号分为内核版本和发行版本，该如何查看已经安装好的Linux系统的这两个版本号呢？
+Linux 系统的版本号分为内核版本和发行版本，该如何查看已经安装好的 Linux 系统的这两个版本号呢？
 
 ### 1.查看内核版本号
 
@@ -128,24 +134,24 @@ Rocky Linux release 9.5 (Blue Onyx)
 
 ## 查看系统的位数
 
-操作系统分为32位和64位两种，如果不清楚自己使用的系统的位数，可以通过以下命令进行查看：
+操作系统分为 32 位和 64 位两种，如果不清楚自己使用的系统的位数，可以通过以下命令进行查看：
 
 ```shell
 # getconf LONG_BIT
 64
 ```
 
-## UI切换
+## UI 切换
 
 ### 从图形化界面切换到文本字符模式
 
 从图形化界面切换到文本字符模式的命令如下：
 
 ```shell
-# 使用init命令，适用CentOS的所有版本
+# 使用 init 命令，适用 CentOS 的所有版本
 init 3
 
-# 使用systemd命令。只能适用于Cent0S 7以上的版本
+# 使用 systemd 命令。只能适用于 Cent0S 7 以上的版本
 systemctl isolate multi-user. target
 ```
 
@@ -156,10 +162,10 @@ systemctl isolate multi-user. target
 从文本字符模式切换到图形化界面的命令如下：
 
 ```shell
-# 使用init命令，适用于CentOS的所有版本
+# 使用 init 命令，适用于 CentOS 的所有版本
 init 5
 
-# 使用systemd命令，只适用于CentOS 7以上的版本
+# 使用 systemd 命令，只适用于 CentOS 7 以上的版本
 systemctl isolate graphical.target
 ```
 

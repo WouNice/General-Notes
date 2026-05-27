@@ -1,12 +1,11 @@
-# 什么是Git
+# 什么是 Git
 
-Git是免费、开源的分布式版本控制系统。
+Git 是免费、开源的分布式版本控制系统。
 
-官网：https://git-scm.com/
+- 官网：https://git-scm.com/
+- 命令大纲参考：https://git-scm.com/docs
 
-git下载镜像：
+## Git 下载镜像
 
--   https://registry.npmmirror.com/binary.html?path=git-for-windows/
--   https://mirrors.huaweicloud.com/git-for-windows/
-
-命令大纲参考：https://git-scm.com/docs
+- https://registry.npmmirror.com/binary.html?path=git-for-windows/
+- https://mirrors.huaweicloud.com/git-for-windows/

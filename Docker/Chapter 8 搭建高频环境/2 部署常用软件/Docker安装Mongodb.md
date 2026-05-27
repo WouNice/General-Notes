@@ -2,13 +2,13 @@
 
 ## 获取Mongodb
 
-```shell
+```sh
 docker pull mongo
 ```
 
 ## 创建容器并运行
 
-```shell
+```sh
 docker run -it -d --name mongo -p 27017:27017 mongo --auth
 ```
 
@@ -18,19 +18,19 @@ docker run -it -d --name mongo -p 27017:27017 mongo --auth
 
 进入容器：
 
-```shell
+```sh
 docker exec -it mongo mongo admin
 ```
 
-创建roo用户，配置用户名和密码数据库：
+创建 roo 用户，配置用户名和密码数据库：
 
-```shell
+```bash
 > db.createUser({ user:'root',pwd:'123456',roles:[ { role:'root', db: 'admin'}]});
 ```
 
 认证身份：
 
-```shell
+```text
 > db.auth('root', '123456')
 1
 #返回1则代表认证成功

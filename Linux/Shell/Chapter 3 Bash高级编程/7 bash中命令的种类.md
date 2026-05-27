@@ -1,295 +1,634 @@
-# bash中命令的种类
+# Bash 中命令的种类
 
-## 命令的种类
+> **本章概述**：Bash 中的命令分为 Shell 函数、内置命令、外部可执行文件和别名四大类，它们有不同的优先级和实现方式。理解命令的分类和解析顺序，是掌握 Bash 行为和扩展 Shell 功能的基础。本章还将介绍如何实现自定义的 Shell 函数命令、内置命令和外部命令。
 
-`Bash`支持的命令包括以下三类：
+## 命令的种类与优先级
 
--   `shell`函数：按照`shell`编程的语法构造的可多次调用的代码块, 与其他语言不同的是, `shell`中的函数没有形参列表, 但可以在调用函数时传递任意数量的参数, 函数内部通过`$N`的方式获取指定位置的参数. 我们可以用`typeset -f`命令查看当前`shell`中定义的所有函数函数, 通过下列命令可以直接显示函数名。
+### 四类命令
 
-```bash
-> typeset -f | awk '$2~/\(\)/ { print $1 }'
-> typeset -f | sed -En "s/(.*) \(\)/\1/ p"
-> typeset -f | grep "()"
+| 类型 | 说明 | 示例 | 速度 |
+|------|------|------|------|
+| **别名（Alias）** | 命令的简写或缩写 | `alias ll='ls -l'` | 最快 |
+| **Shell 函数** | 用 Shell 语法编写的函数 | `myfunc() { ... }` | 快 |
+| **内置命令** | 编译在 Bash 内部的命令 | `cd`、`echo`、`type` | 快 |
+| **外部可执行文件** | 独立的二进制程序或脚本 | `/bin/ls`、`/usr/bin/find` | 较慢（需 fork+exec） |
+
+### 命令解析顺序
+
+当输入一条命令时，Bash 按以下顺序查找：
+
+```
+1. 别名（Alias）
+   ↓ （如果找到，展开后重新从第1步开始查找）
+2. Shell 关键字（if, for, while 等）
+   ↓
+3. Shell 函数
+   ↓
+4. 内置命令
+   ↓
+5. 外部可执行文件（按 PATH 顺序搜索）
 ```
 
--   内置命令：由`shell`在源代码层面提供的命令，而不是存在于文件系统中的某个可执行文件。例如，用于进入或者切换目录的`cd`命令并不是某个外部文件，在执行内置命令时不需要`fork`子进程，也不需要使用`exec`加载外部可执行文件，因此不会触发磁盘`I/O`，执行内置命令相当于执行当前`shell`源代码中的一个函数。我们可以用`type`判断一个命令是否为内置命令：
+> **注意**：别名展开后会重新从第 1 步开始查找，可能产生递归。Bash 通过检测递归来避免无限循环。
 
 ```bash
-> type cd alias
-cd is a shell builtin
-alias is a shell builtin
-> compgen -b  # 显示所有内置命令
+alias ls='ls --color=auto'
+# 输入 ls → 展开为 "ls --color=auto" → 重新查找 → 内置/外部 ls → 执行
 ```
 
--   外部可执行文件：一般为编译好的二进制文件, `bash`会在当前路径和`PATH`环境变量中的路径下寻找可执行文件, `bash`使用哈希表（内存中的数据存储区）记住可执行文件的完整路径名, 用于避免多次重复的全局搜索。
+### type 命令
+
+`type` 是 Bash 内置命令，用于查看命令的类型和定义来源。
+
+**语法**：
 
 ```bash
-> man
-What manual page do you want?
-> type man
-man is hashed (/usr/bin/man)  # 再次访问就已经被哈希表缓存了
-> which man  # 查看外部命令的路径
-/usr/bin/man
+type [-afptP] 名称 [名称 ...]
 ```
 
-在进行命令查询时, 优先级为`shell 函数 > 内置命令 > 外部可执行文件`, 例如`Ubuntu`系统中`/usr/bin/`路径下自带`GNU`标准`echo`可执行文件, 而`bash`中也存在内置命令`echo`, 按照命令查询顺序, 在`bash`中使用`echo`时会优先执行内置命令. 在`bash`中还可以使用`alias`为常用的命令添加别名, 别名的优先级要高于以上三种常规命令。
+**参数说明**：
+
+| 参数 | 说明 |
+|------|------|
+| `-a` | 显示所有匹配项（包括别名、函数、内置、外部） |
+| `-f` | 抑制函数查找 |
+| `-p` | 仅显示外部命令的路径 |
+| `-P` | 强制按 PATH 查找（忽略别名和函数） |
+| `-t` | 仅显示类型（alias / function / builtin / file / keyword） |
+
+**示例**：
 
 ```bash
-> which ls
-/usr/bin/ls  # 是外部命令
-> type ls
-ls is aliased to `ls --color=auto'   # 别名 ls 会自动显示颜色
+type ls
+# ls is aliased to `ls --color=auto'
+
+type -t ls
+# alias
+
+type -a ls
+# ls is aliased to `ls --color=auto'
+# ls is /usr/bin/ls
+
+type cd
+# cd is a shell builtin
+
+type myfunc
+# myfunc is a function
+# myfunc () { ... }
+
+type -p grep
+# /usr/bin/grep
+
+type -P echo
+# /usr/bin/echo  ← 忽略内置 echo，找到外部版本
 ```
 
-## 命令的结构
+### command 与 builtin 命令
 
-### 实现 shell 函数命令
+**command 命令**：绕过别名和函数查找，直接执行内置命令或外部命令。
 
-在`bash`中定义函数时，关键字`function`可以省略，函数内部可能包括内置命令，外部命令，变量，数组，关键字等，其本质就是代码块，不过有一些类似其他语言中函数的特性 。
+**语法**：
 
 ```bash
-function pskill()
-{
-    # 这个函数的功能类似于 pkill
-    # 判断参数数量是否正确
+command [-pVv] 命令 [参数 ...]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `-p` | 使用默认 PATH 查找命令 |
+| `-V` | 显示命令的详细描述 |
+| `-v` | 显示命令的路径或定义 |
+
+**builtin 命令**：强制执行内置命令，忽略同名函数和外部命令。
+
+**语法**：
+
+```bash
+builtin 命令 [参数 ...]
+```
+
+**示例**：
+
+```bash
+# 绕过同名函数
+cd() { echo "fake cd"; }
+cd /tmp        # fake cd（调用了函数）
+command cd /tmp  # 真正切换目录（绕过函数）
+builtin cd /tmp  # 真正切换目录（强制使用内置命令）
+
+# 查看命令来源
+command -v ls     # alias ls='ls --color=auto'
+command -v cd     # cd
+command -V cd     # cd is a shell builtin
+```
+
+### enable 命令
+
+`enable` 用于启用或禁用 Bash 内置命令。
+
+**语法**：
+
+```bash
+enable [-a] [-d] [-f 文件] [-n] [-s] [内置命令 ...]
+```
+
+**参数说明**：
+
+| 参数 | 说明 |
+|------|------|
+| `-a` | 列出所有内置命令及其状态 |
+| `-d` | 删除通过 `-f` 加载的内置命令 |
+| `-f 文件` | 从动态库文件加载新的内置命令 |
+| `-n` | 禁用指定内置命令 |
+| `-s` | 仅列出 POSIX 特殊内置命令 |
+
+**示例**：
+
+```bash
+# 列出所有内置命令
+enable -a
+
+# 禁用内置命令（使用外部版本替代）
+enable -n cd
+type cd  # cd is /usr/bin/cd
+
+# 重新启用
+enable cd
+
+# 禁用后使用外部命令
+enable -n echo
+echo "test"  # 调用 /usr/bin/echo
+```
+
+## 实现 Shell 函数命令
+
+### 函数定义语法
+
+```bash
+[function] 函数名 [()] {
+    命令列表
+    [return n]
+}
+```
+
+### 示例：pskill 函数
+
+实现一个按名称杀死进程的命令：
+
+```bash
+pskill() {
+    local pid
     if [ $# -lt 1 ]; then
-        echo "Usage: pskill <proc-name>"
-        return -127
+        echo "Usage: pskill process_name" >&2
+        return 2
     fi
 
-    local pid  # 设置作用域为本地, 也就是代码块内部
-    # 不这么写就默认是全局变量
+    pid=$(ps -e -o pid,comm | awk -v proc="$1" '$2 ~ proc {print $1}')
 
-    pid=$(ps -ax | grep $1 | grep -v grep | awk '{ print $1 }')
-    kill -9 $pid &  # 提交作业
-    echo -n "killing $1 (process $pid)..."
-    wait  # 等待作业完成
-    echo "slaughtered."
+    if [ -z "$pid" ]; then
+        echo "No matching process found for: $1" >&2
+        return 1
+    fi
+
+    echo "Killing: $pid"
+    kill -s SIGTERM $pid
+    return 0
 }
 ```
 
-相比其他语言, `bash`中的函数没有固定的形参列表, 好处是其调用形式更像普通的命令, 例如:`函数名 <参数1> <参数2> ...`, 但坏处是如果不在函数内部对参数的数量以及合法性进行判断, 很容易产生严重的运行时错误。
+### 持久化函数
+
+将函数定义写入 `~/.bashrc` 或 `~/.bash_functions`（然后在 `.bashrc` 中 source）：
 
 ```bash
-> pskill
-Usage: pskill <proc-name>
-
-> xclock &
-[1] 3003
-> pskill xclock
-[2] 3043
-killing xclock (process 3003)...[1]-  Killed                  xclock
-[2]+  Done                    kill -9 $pid
-slaughtered.
+# ~/.bashrc 中添加
+if [ -f ~/.bash_functions ]; then
+    . ~/.bash_functions
+fi
 ```
 
-### 实现内置命令
-
-本节使用`5.0`版本的`GUN bash`源代码进行讲解, 在修改源代码之前, 建议先确认你的环境是否能够成功配置并编译`bash`:
+**使用 `declare -f` 导出函数**：
 
 ```bash
-> git clone https://git.savannah.gnu.org/git/bash.git
-> ./configure
-> make  # 成功则会在当前目录下生成可执行文件
+# 查看函数定义
+declare -f pskill
+
+# 导出函数（使 child-shell 可用）
+export -f pskill
+
+# 查看所有已导出的函数
+declare -Fx
 ```
 
-现在我们开始实现一个名为`scarlet`的内置命令, 其功能和`eval`相同. 我们令源代码根目录为`$(topdir)`, 首先我们要在`$(topdir)/builtins/`路径下建立`scarlet.def`文件并填充如下内容：
+## 实现内置命令
 
-```c
-$PRODUCES scarlet.c
+### Bash 内置命令的实现原理
 
-$BUILTIN scarlet
-$FUNCTION scarlet_builtin
-$SHORT_DOC scarlet [arg ...]
-Execute arguments as a shell command.
+Bash 的内置命令是用 C 语言编写并编译到 Bash 可执行文件中的。其实现流程如下：
 
-Combine ARGs into a single string, use the result as input to the shell,
-and execute the resulting commands.
-
-Exit Status:
-Returns exit status of command or success if command is null.
-$END
+```
+1. 编写 .def 文件（命令定义）
+     ↓
+2. mkbuiltins 工具生成 .c 和 .h 文件
+     ↓
+3. 编译为动态库（.so）或静态链接到 Bash
+     ↓
+4. Bash 启动时注册内置命令
+     ↓
+5. 用户输入命令时调用对应的 C 函数
 ```
 
-`*.def`格式的文件是`bash`内置命令的预定义文件, 在`make`过程中会先将`$(topdir)/builtins/mkbuiltins.c`文件编译为`mkbuiltins`, 然后使用这个工具将预定义文件转换为`*.c`格式, 再通过`gcc`将其编译为`*.o`文件, 并最终成为`bash`可执行文件的一部分. 使用`mkbuiltins`可以显著提升内置命令的编写效率, 因为这个工具帮你自动生成了大部分重复的代码, 你只需要配置以下几个变量：
+### Bash 5.0 源码结构
 
--   `$PRODUCES`: 用于表示转换源代码目标文件的名字, 变量的命名注意不要与其他文件冲突, 之后我们还要在`Makefile.in`中进行配置。
--   `$BUILTIN`: 最终可调用的内置命令的名字, 命名规则与函数相同。
--   `$FUNCTION`: 命令的入口函数名, 命名规则与函数相同, 这个函数的实现也需要在这个文件中。
--   `$SHORT_DOC`: 命令的简要帮助文档, 以`$END`作为结束标志, 这部分内容在运行时可以通过`命令 --help`的方式查看。
+```
+bash-5.0/
+├── builtins/
+│   ├── scarlet.def      ← 各内置命令的定义文件
+│   ├── cd.def
+│   ├── echo.def
+│   ├── kill.def
+│   ├── trap.def
+│   └── ...
+├── mkbuiltins/           ← 内置命令生成工具
+├── Makefile.in           ← 编译配置
+└── config.h.in
+```
 
-接下来在我们需要在`scarlet.def`文件中实现`scarlet_builtin`函数：
+### .def 文件格式
+
+每个 `.def` 文件定义一个内置命令，包含以下部分：
 
 ```c
-#include <config.h>
-#if defined (HAVE_UNISTD_H)
-#  ifdef _MINIX
-#    include <sys/types.h>
-#  endif
-#  include <unistd.h>
-#endif
+// echo.def 示例结构
+$PROGNAME = echo
+$BUILTIN = echo
+$FUNCTION = echo_builtin
+$SHORT_DOC = echo [-neE] [arg ...]
+$LONG_DOC = ...
+$DEPENDS_ON = 1
 
-#include "../shell.h"
-#include "bashgetopt.h"
-#include "common.h"
+#include <stdio.h>
+#include "builtins.h"
+#include "shell.h"
 
-int
-scarlet_builtin (list)
-     WORD_LIST *list;
-{
-  if (no_options (list))
-    return (EX_USAGE);
-  list = loptend;
-
-  return (list ? evalstring (string_list (list), "scarlet", SEVAL_NOHIST) : EXECUTION_SUCCESS);
+int echo_builtin(WORD_LIST *list) {
+    // 实现逻辑
+    return EXECUTION_SUCCESS;
 }
 ```
 
-我们首先引用了必要的头文件用于处理输入, 主要是为了使用`WORD_LIST`这个数据结构, 它存储了`bash`对当前命令的分词结果`token`, 然后通过`evalstring`解析并执行这些`token`. 可以看出, 我们在编写这个内置命令时只需要处理核心业务逻辑, 其他部分都可以通过合理配置预定义变量让`mkbuiltins`自动生成. 接下来需要在`Makefile.in`文件中对编译生成的中间文件和引用的头文件进行配置：
+### mkbuiltins 工具
+
+`mkbuiltins` 读取 `.def` 文件生成：
+
+| 生成文件 | 说明 |
+|---------|------|
+| `builtins.c` | 内置命令分发表 |
+| `builtext.h` | 函数声明和结构体定义 |
+| `*.c` | 每个内置命令的 C 源码 |
+
+### 动态加载内置命令
+
+Bash 支持通过 `enable -f` 从动态库加载内置命令：
 
 ```bash
-# DEFSRC 变量中添加
-$(srcdir)/scarlet.def
+# 编译自定义内置命令为 .so
+gcc -shared -fPIC -o mycmd.so mycmd.c
 
-# OFILES 变量中添加
-scarlet.o
+# 加载
+enable -f ./mycmd.so mycmd
 
-# dependencies 区域中添加
-scarlet.o: scarlet.def
+# 使用
+mycmd arg1 arg2
 
-# def files 区域中添加
-scarlet.o: $(topdir)/command.h ../config.h $(BASHINCDIR)/memalloc.h
-scarlet.o: $(topdir)/error.h $(topdir)/general.h $(topdir)/xmalloc.h
-scarlet.o: $(topdir)/quit.h $(topdir)/dispose_cmd.h $(topdir)/make_cmd.h
-scarlet.o: $(topdir)/subst.h $(topdir)/externs.h  $(topdir)/sig.h
-scarlet.o: $(topdir)/shell.h $(topdir)/syntax.h $(topdir)/unwind_prot.h $(topdir)/variables.h $(topdir)/conftypes.h
-scarlet.o: $(BASHINCDIR)/maxpath.h ../pathnames.h
+# 卸载
+enable -d mycmd
 ```
 
-处理完所有的预定义文件后, `mkbuiltins`还会生成用于存放所有内置命令接口的`builtins.c`和`builtext.h`文件, 我们现在可以重新配置并编译`bash`来测试我们实现的内置命令`scarlet`的效果：
+> **注意**：动态加载内置命令需要 C 语言编程能力，且需要注意与 Bash 版本的兼容性。实际场景中较少使用。
 
-```bash
-# 注意要进到 $(topdir)/ 路径下
-> make clean; ./configure; make -j6
-> ./bash
-> scarlet --help
-scarlet: scarlet [arg ...]
-    Execute arguments as a shell command.
+## 实现外部命令
 
-    Combine ARGs into a single string, use the result as input to the shell,
-    and execute the resulting commands.
+### 外部命令的执行过程
 
-    Exit Status:
-    Returns exit status of command or success if command is null.
-> VAR=1; POINT+VAR
-> echo \$$POINT
-$VAR  # bash 默认只解释一次变量名
-> scarlet echo \$$POINT
-1  # 自定义内置变量实现了 eval 多次解释的功能
+```
+用户输入命令
+  ↓
+Bash 在 PATH 中搜索可执行文件
+  ↓
+fork 创建子进程
+  ↓
+exec 加载可执行文件
+  ↓
+内核根据文件头判断类型
+  ├── ELF 格式 → 直接执行
+  └── shebang → 使用指定解释器执行
+  ↓
+子进程执行完毕，退出状态传回父进程
 ```
 
-### 实现外部命令
-
-大部分外部命令都是事先编译好的二进制可执行文件, 在`bash`中会通过`fork-exec`模式处理每个外部命令, 也就是说外部命令都运行在子进程中. 在本节将通过实现`ls`命令的最基础功能来讲解外部命令的实现过程：
+### C 语言实现外部命令示例
 
 ```c
-#include "apue.h"  // 这个头文件需要自己去 APUE 网站下载
-#include <dirent.h>  // 路径处理相关头文件
+// myls.c - 简化版 ls
+#include <stdio.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <pwd.h>
+#include <grp.h>
+#include <time.h>
 
-int main(int argc, char const *argv[])
-{
-    DIR *dp;  // 路径数据结构
-    struct dirent *dirp;  // 子路径数据结构
+void print_file_info(const char *name, const char *path) {
+    struct stat st;
+    char fullpath[1024];
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", path, name);
 
-    // 判断参数数量是否正确
-    if (argc != 2)
-        err_quit("usage: myls directory_name");
-
-    // 判断传入的目录是否能打开
-    if ((dp = opendir(argv[1])) == NULL)
-        err_sys("can't open %s", argv[1]);
-
-    // 遍历指定目录
-    while ((dirp = readdir(dp)) != NULL)
-    {
-        printf("%s\n", dirp->d_name);
+    if (lstat(fullpath, &st) < 0) {
+        perror(name);
+        return;
     }
 
+    // 文件类型
+    char type = '?';
+    if (S_ISREG(st.st_mode))  type = '-';
+    else if (S_ISDIR(st.st_mode))  type = 'd';
+    else if (S_ISLNK(st.st_mode))  type = 'l';
+
+    // 权限
+    char perms[10] = "---------";
+    if (st.st_mode & S_IRUSR) perms[0] = 'r';
+    if (st.st_mode & S_IWUSR) perms[1] = 'w';
+    if (st.st_mode & S_IXUSR) perms[2] = 'x';
+    if (st.st_mode & S_IRGRP) perms[3] = 'r';
+    if (st.st_mode & S_IWGRP) perms[4] = 'w';
+    if (st.st_mode & S_IXGRP) perms[5] = 'x';
+    if (st.st_mode & S_IROTH) perms[6] = 'r';
+    if (st.st_mode & S_IWOTH) perms[7] = 'w';
+    if (st.st_mode & S_IXOTH) perms[8] = 'x';
+
+    // 所有者和组
+    struct passwd *pw = getpwuid(st.st_uid);
+    struct group *gr = getgrgid(st.st_gid);
+
+    // 时间
+    char timebuf[64];
+    strftime(timebuf, sizeof(timebuf), "%b %d %H:%M",
+             localtime(&st.st_mtime));
+
+    printf("%c%s %3lu %s %s %8ld %s %s\n",
+           type, perms, (unsigned long)st.st_nlink,
+           pw ? pw->pw_name : "unknown",
+           gr ? gr->gr_name : "unknown",
+           (long)st.st_size, timebuf, name);
+}
+
+int main(int argc, char *argv[]) {
+    const char *path = (argc > 1) ? argv[1] : ".";
+    DIR *dir = opendir(path);
+    if (!dir) {
+        perror(path);
+        return 1;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;  // 跳过隐藏文件
+        print_file_info(entry->d_name, path);
+    }
+
+    closedir(dir);
     return 0;
 }
 ```
 
-这个例子来自于《Unix环境高级编程》第一章, 实现一个命令至少需要完成输出参数处理, 核心业务逻辑, 结果输出三个部分. 而且建议在参数输入错误时给出用法提示, 在运行出现问题时应该给出适当的退出状态码. 现在我们编译这个命令并将其放到`PATH`包含的目录中, 然后测试这个命令是否能正确输出。
+**编译与安装**：
 
 ```bash
-> sudo gcc 1/ls.c -o /usr/bin/myls
-> myls  # 用法错误
-usage: myls directory_name  # 给出提示
-> myls .  # 遍历当前路径
-snap
-peko
-pekosh
-R
-.ssh
+# 编译
+gcc -o myls myls.c
+
+# 测试
+./myls /tmp
+
+# 安装到系统路径
+sudo cp myls /usr/local/bin/
 ```
 
-## 脚本的结构
+### 参考书籍
 
-在`bash`中, 脚本就是命令和控制逻辑的组合, 我们先看一个普通脚本的例子：
+| 书名 | 说明 |
+|------|------|
+| 《Advanced Programming in the UNIX Environment》（APUE） | UNIX 系统编程经典，涵盖文件 I/O、进程控制、信号等 |
+| 《The Linux Programming Interface》（TLPI） | Linux 系统编程权威指南 |
+| 《UNIX Systems Programming》（USP） | UNIX 系统编程入门 |
 
-```bash
-#!/bin/bash
+## Shell 脚本基础
 
-clear
-echo "This is information provided by mysystem.sh.  Program starts now."
-
-printf "Hello, $USER\n\n"
-
-printf "Today's date is `date`, this is week `date +"%V"`.\n\n"
-
-echo "These users are currently connected:"
-w | cut -d " " -f 1 - | grep -v USER | sort -u
-echo
-
-printf "This is `uname -s` running on a `uname -m` processor.\n\n"
-
-echo "This is the uptime information:"
-uptime
-echo
-
-echo "That's all folks!"
-```
-
--   `#!/bin/bash`是`shabang`, 用于指定这个脚本的解释器。
--   `/usr/bin/clear`是一个外部命令，用于清除当前`shell`中的输出信息。
--   `echo`和`printf`都是`bash`的内置命令，不同的是`echo`始终以`0`状态码退出（退出状态永远是成功），并且仅在标准输出上打印参数，然后打印行尾字符，而`printf`允许定义格式字符串，并在失败时给出非零的退出状态代码。
--   `USER`是一个变量，用于存储当前用户的名字，需要使用`$`取出变量的值。
-
-脚本有两种执行方式：
-
--   `source`或`.`: 这种方式是在当前`shell`中执行脚本, 等价于用`{}`包裹的代码块, 但要注意这种执行方法可能会污染当前`shell`中的变量。
--   `./脚本名`或`bash 脚本名`: 这种方式本质上是执行外部变量`bash`并将脚本名作为参数传递给命令, 这种方法启动的脚本会运行在`child shell`中, 不可以访问父`shell`的全局变量, 只能访问环境变量. 需要注意的是使用`./脚本名`方法执行脚本需要在脚本第一行配置`shabang`.
-
-我们再来看一个初始化脚本`upon-sound`的例子：
+### 脚本结构
 
 ```bash
 #!/bin/bash
+# ^^^ shebang 行，指定解释器路径
+# 必须是脚本的第一行，以 #! 开头
 
-case "$1" in  # 脚本的控制逻辑，根据输入选择要执行的分支
-'start')  # 服务启动时执行
-  cat /usr/share/audio/at_your_service.au > /dev/audio
-  ;;
-'stop')  # 服务停止时执行
-  cat /usr/share/audio/oh_no_not_again.au > /dev/audio
-  ;;
-esac
-exit 0
+# 脚本元信息
+# Description: 示例脚本
+# Author: xxx
+# Date: 2024-01-01
+
+# 严格模式
+set -euo pipefail
+
+# 变量定义
+readonly SCRIPT_NAME=$(basename "$0")
+readonly SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
+# 函数定义
+usage() {
+    cat <<EOF
+Usage: $SCRIPT_NAME [OPTIONS] <arg>
+
+Options:
+  -h, --help     Show this help message
+  -v, --version  Show version
+EOF
+}
+
+# 主逻辑
+main() {
+    # 处理参数
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            *) echo "Unknown option: $1" >&2; exit 2 ;;
+        esac
+        shift
+    done
+}
+
+main "$@"
 ```
 
-初始化脚本（启动脚本）存储在`/etc/rc.d/init.d`或`/etc/init.d`目录下，用于启动系统服务，例如：系统日志服务，电源管理服务，名称和邮件服务。`PID=1`的初始化进程`init`读取其配置文件，并决定在每个运行级别中启动或停止哪些服务。
+### echo vs printf
+
+| 特性 | `echo` | `printf` |
+|------|--------|----------|
+| 可移植性 | 内置行为不一致（不同 Shell/系统） | POSIX 标准，行为一致 |
+| 格式化 | 不支持 | 支持 `%s`, `%d`, `%f` 等 |
+| 转义序列 | 部分支持（`-e` 选项，非便携） | 原生支持 `\n`, `\t` 等 |
+| 自动换行 | 默认添加 | 不自动换行（需手动 `\n`） |
+| 推荐场景 | 简单输出 | 格式化输出、脚本中输出 |
 
 ```bash
-> mv upon-sound /etc/init.d/upon-sound
-> ln -s /etc/init.d/upon-sound /etc/rc3.d/S99upon-sound  # 运行级别为3 启动时调用 start
-> ln -s /etc/init.d/upon-soudecanshund /etc/rc0.d/K01upon-sound  # 运行级别为0 关机时调用 stop
+# echo 简单输出
+echo "Hello, World!"
+
+# printf 格式化输出
+printf "Name: %-10s Age: %3d\n" "Alice" 25
+printf "Name: %-10s Age: %3d\n" "Bob" 30
+
+# printf 不自动换行
+printf "Processing..."   # 无换行
+printf "Done\n"          # 手动换行
 ```
+
+> **建议**：在脚本中使用 `printf` 替代 `echo`，行为更可预测。
+
+### 脚本执行方式对比
+
+| 执行方式 | Shell 类型 | 变量影响 | 初始化 | 退出方式 |
+|---------|-----------|---------|--------|---------|
+| `source script.sh` | 当前 Shell | 影响当前环境 | 无 | `return N` |
+| `. script.sh` | 当前 Shell | 影响当前环境 | 无 | `return N` |
+| `./script.sh` | child-shell | 无影响 | 加载 BASH_ENV | `exit N` |
+| `bash script.sh` | child-shell | 无影响 | 加载 BASH_ENV | `exit N` |
+| `exec ./script.sh` | 替换当前 Shell | 当前 Shell 消失 | 加载 BASH_ENV | `exit N` |
+
+### 初始化脚本与运行级别
+
+**System V init 系统**：
+
+```
+/etc/init.d/          ← 服务脚本存放目录
+/etc/rc0.d/           ← 运行级别 0（关机）的符号链接
+/etc/rc1.d/           ← 运行级别 1（单用户）的符号链接
+/etc/rc2.d/           ← 运行级别 2（多用户，无 NFS）
+/etc/rc3.d/           ← 运行级别 3（完整多用户）
+/etc/rc5.d/           ← 运行级别 5（图形界面）
+/etc/rc6.d/           ← 运行级别 6（重启）
+```
+
+**符号链接命名规则**：
+
+| 前缀 | 含义 | 执行时机 |
+|------|------|---------|
+| `SXX服务名` | Start | 进入该运行级别时启动（XX 为两位数字，表示启动顺序） |
+| `KXX服务名` | Kill | 离开该运行级别时停止 |
+
+```bash
+# 示例
+ls /etc/rc3.d/
+S10network  S55sshd  S80httpd  K50xinetd
+
+# 创建符号链接
+sudo ln -s /etc/init.d/nginx /etc/rc3.d/S80nginx
+sudo ln -s /etc/init.d/nginx /etc/rc0.d/K20nginx
+```
+
+**systemd 系统**（现代 Linux 发行版）：
+
+```bash
+# 服务单元文件位置
+/etc/systemd/system/
+/usr/lib/systemd/system/
+
+# 常用命令
+systemctl start nginx      # 启动
+systemctl stop nginx       # 停止
+systemctl enable nginx     # 开机自启
+systemctl disable nginx    # 取消自启
+systemctl status nginx     # 查看状态
+systemctl list-units       # 列出所有单元
+```
+
+## 别名详解
+
+### alias 命令
+
+**语法**：
+
+```bash
+alias [名称[=值] ...]
+alias -p
+```
+
+| 参数 | 说明 |
+|------|------|
+| `名称=值` | 定义别名 |
+| `-p` | 以可重用格式列出所有别名 |
+| （无参数） | 列出所有别名 |
+
+**示例**：
+
+```bash
+# 定义别名
+alias ll='ls -la'
+alias gs='git status'
+alias grep='grep --color=auto'
+
+# 列出所有别名
+alias
+
+# 查看特定别名
+alias ll
+# alias ll='ls -la'
+```
+
+### unalias 命令
+
+**语法**：
+
+```bash
+unalias [-a] 名称 [名称 ...]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `-a` | 删除所有别名 |
+| `名称` | 删除指定别名 |
+
+**示例**：
+
+```bash
+# 删除指定别名
+unalias ll
+
+# 删除所有别名
+unalias -a
+```
+
+### 别名的局限性
+
+| 局限 | 说明 |
+|------|------|
+| 不支持参数 | 别名只是简单的文本替换，无法像函数那样接受参数 |
+| 脚本中默认禁用 | 非交互式 Shell 默认不展开别名 |
+| 递归风险 | 别名展开可能产生递归（Bash 会检测并阻止） |
+| 不可嵌套 | 别名定义中引用其他别名时，行为可能不符合预期 |
+
+> **建议**：对于需要参数的复杂命令，使用 Shell 函数替代别名。
+
+## 最佳实践总结
+
+| 场景 | 推荐做法 | 说明 |
+|------|---------|------|
+| 简单命令缩写 | 使用别名 | `alias ll='ls -la'` |
+| 需要参数的命令 | 使用 Shell 函数 | `myfunc() { ... }` |
+| 高性能命令 | 考虑内置命令或 C 外部命令 | 避免 fork+exec 开销 |
+| 调试命令来源 | 使用 `type -a` | 查看所有匹配项 |
+| 绕过别名/函数 | 使用 `command` 或 `\` 前缀 | `\ls` 或 `command ls` |
+| 脚本输出 | 使用 `printf` | 行为可预测，可移植 |
+| 禁用危险内置命令 | 使用 `enable -n` | 临时禁用 |
+| 持久化自定义函数 | 写入 `~/.bashrc` 或独立文件 | `source` 加载 |

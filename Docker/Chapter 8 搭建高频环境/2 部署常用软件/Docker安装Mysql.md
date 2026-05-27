@@ -4,13 +4,13 @@
 
 拉取镜像
 
-```
+```sh
 docker pull mysql
 ```
 
 ## 创建容器并运行
 
-```
+```sh
 docker run -d -it --name mysql --restart=always -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root -e TZ=Asia/Shanghai mysql
 ```
 
@@ -19,7 +19,7 @@ docker run -d -it --name mysql --restart=always -p 3306:3306 -e MYSQL_ROOT_PASSW
 
 ## 连接Mysql服务器
 
-```
+```sh
 docker exec -it mysql bash
 ```
 
@@ -31,4 +31,3 @@ Enter password:
 Welcome to the MySQL monitor.  Commands end with ; or \g.
 ......
 ```
-

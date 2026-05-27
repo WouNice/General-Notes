@@ -1,211 +1,453 @@
-# bash中的退出状态机制
+# Bash 退出状态机制
 
-## 程序的退出状态
+> **本章概述**：退出状态（Exit Status）是进程向调用者传递执行结果的核心机制。在 Bash 中，每条命令执行完毕都会返回一个 0–255 的退出状态码，通过 `$?` 变量获取。理解退出状态的传递规则和各类命令的退出状态约定，是编写可靠脚本和正确处理错误的基础。
 
-当一个程序结束时会向父进程报告自己的退出状态( `exit status` )。通过传递 `int` 类型的变量给库函数 `exit` 或系统调用 `_exit` 可以设置当前程序的退出状态，在 `Linux` 中，通过 `WEXITSTATUS` 返回的退出状态的值域为 `[0, 255]` 之间的整数 。如果传递的值不在这个范围内，内核会自动帮你强转为 `u_int8_t`、通过 `waitpid` 库函数可以得到子进程的退出状态，其值存储在参数 `wstatus` 的低 `8` 位中。
+## 退出状态基础
 
-```c
-// 定义在 wait.h 中
-# define WEXITSTATUS(status)    __WEXITSTATUS (status)
+### 进程退出状态
 
-// 定义在 waitstatus.h 中
-/* If WIFEXITED(STATUS), the low-order 8 bits of the status.  */
-#define    __WEXITSTATUS(status)    (((status) & 0xff00) >> 8)
+当进程调用 `exit()`、`_exit()` 或从 `main()` 返回时，内核通过 `WEXITSTATUS` 宏取其参数的低 8 位作为退出状态码：
+
+```
+exit(5)  → WEXITSTATUS(status) = 5
+exit(256) → WEXITSTATUS(status) = 0  (256 的低 8 位为 0)
+exit(-1)  → WEXITSTATUS(status) = 255 (-1 的补码低 8 位为 255)
 ```
 
-下面这个例子展示了如何使用 `waitpid` 及相关宏函数获取子进程的退出状态：
+**C 语言视角**：
 
 ```c
-#include <unistd.h>
-#include <stdlib.h>
 #include <stdio.h>
-#include <sys/types.h>
+#include <stdlib.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
-#define PARENT_EXIT 10086
-#define CHILD_EXIT -10
-
-int main()
-{
+int main() {
     pid_t pid = fork();
-
-    if (pid > 0)
-    {
-        int wstatus;
-        // 父进程等待子进程执行完毕, 用 WUNTRACED 选项追踪已结束的子进程
-        pid_t child_pid = waitpid(pid, &wstatus, WUNTRACED);
-
-        if (WIFEXITED(wstatus))
-            printf("Child exit status: %d\n", WEXITSTATUS(wstatus));
-        else
-            perror("Bad wait status\n");
-
-        // 父进程退出
-        exit(PARENT_EXIT);
+    if (pid == 0) {
+        // 子进程
+        exit(5);
+    } else {
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            printf("Exit status: %d\n", WEXITSTATUS(status));
+            // Exit status: 5
+        }
     }
-    else if (pid == 0)
-    {
-        // 子进程立即退出, 因此需要父进程设置 WUNTRACED
-        exit(CHILD_EXIT);
-    }
-    else
-    {
-        // 处理 fork 时出现的错误
-        perror("fork\n");
-        exit(EXIT_FAILURE);
-    }
+    return 0;
 }
 ```
 
-编译并运行上例可以得到被强转后的状态码，我们使用 `WIFEXITED` 判断等待的子进程是否执行成功，然后对执行成功子进程使用 `WEXITSTATUS` 获取其退出状态。对程序来说，最终的退出状态就是主进程的退出状态。
+### 信号退出状态
+
+当进程被信号终止时（而非主动调用 `exit`），Shell 将退出状态设为 `128 + 信号编号`：
+
+| 终止方式 | 退出状态计算 | 示例 |
+|---------|------------|------|
+| 被信号 N 终止 | `128 + N` | `SIGKILL`(9) → 137 |
+| 主动 `exit(N)` | `N`（低 8 位） | `exit(1)` → 1 |
 
 ```bash
-> gcc exitcode.c;./a.out;echo "Parent exit status: $?"
-Child exit status: 246  # -10 强转为 uint8
-Parent exit status: 102  # 10086 强转为 uint8
+sleep 50 &
+kill -9 $!   # 被信号 9 终止
+wait $!
+echo $?      # 137 = 128 + 9
+
+sleep 50 &
+kill -TERM $!  # 被信号 15 终止
+wait $!
+echo $?        # 143 = 128 + 15
 ```
 
-在 `POSIX` 标准中规定退出状态 `0` 代表该程序正常退出，`1` 代表发生错误，其他数字由程序自行规定，因此在 `glibc` 的 `stdlib.h` 中仅定义了如下宏：
+### Bash 中的退出状态变量
 
-```c
-#define EXIT_FAILURE    1       /* Failing exit status.  */
-#define EXIT_SUCCESS    0       /* Successful exit status.  */
-```
-
-程序本身一般会在文档中事先约定每种退出状态代表的退出原因( `termination` )，例如在 `ls` 的帮助文档中：
+| 变量 / 语法 | 说明 |
+|-------------|------|
+| `$?` | 最近一条前台命令的退出状态 |
+| `0` | 表示成功（true） |
+| `非零` | 表示失败（false），不同值可表示不同错误类型 |
 
 ```bash
-> ls --help
-...其他内容...
-Exit status:  # 退出状态
- 0  if OK,  # 正常执行
- 1  if minor problems  # 次要问题, 例如: 无法访问子目录
- 2  if serious trouble  # 严重错误, 例如: 无法访问命令行参数
-...其他内容...
+true; echo $?    # 0
+false; echo $?   # 1
+ls /nonexistent 2>/dev/null; echo $?  # 2
 ```
 
-## 命令的退出状态
+## 各类命令的退出状态
 
-在 `bash` 中会记录所执行命令的退出状态, 可以通过 `$?` 获取最近执行的命令的退出状态. `bash` 自身的退出状态为执行的最后一条命令的退出状态, 也就等价于显式指定 `exit $?` . 如果没有执行任何命令就退出, 则 `bash` 的退出状态为 `0` , 要注意在 `bash` 中用 `0` 表示 `true` , 用非零表示 `false`。
+### 内置命令
+
+Bash 内置命令遵循以下退出状态约定：
+
+| 退出状态 | 含义 | 示例 |
+|---------|------|------|
+| `0` | 执行成功 | `cd /tmp` 成功 |
+| `1` | 一般性错误 | `cd /nonexistent` |
+| `2` | 用法错误（参数不正确） | `cd`（缺少参数或参数无效） |
+
+**示例**：
 
 ```bash
-# 用 exit 显式指定退出状态
-> bash
-> exit 98
-exit
-> echo $?
-98
-
-# 什么也不执行则退出状态为 0
-> bash
-exit  # Ctrl + D 退出
-> echo $?
-0
-
-# 默认为最后一条命令的退出状态
-> bash
-> ecasd
-ecasd: command not found
-exit  # Ctrl + D 退出
-> echo $?
-127
+cd /tmp; echo $?       # 0  ← 成功
+cd /nonexistent; echo $?  # 1  ← 目标不存在
+cd -; cd; echo $?         # 0  ← 无参数 cd 回到 HOME（成功）
+cd -- -opt; echo $?       # 1  ← 把 -opt 当目录（不存在）
+cd -wrong; echo $?        # 2  ← 无效选项，用法错误
 ```
 
-在 `bash` 中对不同种类命令的退出状态作出如下规定：
+> **区分 `1` 和 `2`**：退出状态 `1` 表示命令执行过程中出错（运行时错误），退出状态 `2` 表示命令的用法不正确（参数错误）。
 
-**内置命令:** 由于内置命令执行时不需要启动额外的子进程, 因此需要用返回值模拟退出状态. 每个函数都定义了自己的退出状态, 例如: 内置命令 `source` 将脚本文件的最后一个命令的返回状态作为命令的返回状态. `bash` 中所有的内置命令都用退出状态 `2` 表示用法错误, 例如：选项错误, 缺少参数。
+### 外部命令
+
+外部命令被信号终止时，退出状态为 `128 + 信号编号`；正常退出时遵循程序自身的退出状态约定。
 
 ```bash
-> cd -+-  # 错误的参数
-bash: cd: -+: invalid option
-cd: usage: cd [-L|[-P [-e]] [-@]] [dir]
-> echo $?
-2
+sleep 100
+^C  # Ctrl+C 发送 SIGINT（信号2）
+echo $?  # 130 = 128 + 2
+
+sleep 100
+kill -9 $!  # SIGKILL（信号9）
+wait $!
+echo $?    # 137 = 128 + 9
 ```
 
-**外部命令:** 外部命令的退出状态就是使用 `waitpid` 得到的子进程的退出状态, 如果子进程在执行过程被编号为 `N` 的信号所终止, 则得到的退出状态就为 `128+N` .
+### Shell 函数
 
-**Shell 函数:** 定义 `shell` 函数时, 函数名与之前已定义的只读函数名相同则退出状态为 `1` , 当发生语法错误则退出状态为 `2` . 执行 `shell` 函数时, 函数中最后执行的一条命令的退出状态就是整个函数的退出状态。
+Shell 函数的退出状态为函数体中最后一条命令的退出状态，或 `return` 指定的值。
+
+**语法**：
 
 ```bash
-# 二次定义只读函数报错
-> func () { echo; }
-> readonly -f func
-> func; echo $?
-0
-> func () { echo poi; }
-bash: func: readonly function
-> echo $?
-1
-
-# 定义函数发生语法错误
-> fune () {aa}
-bash: syntax error near unexpected token '{aa}'
-> echo $?
-2
-
-# 函数的退出状态是最后执行的命令的退出状态
-> funr () { echo; return 6; }
-> funr; echo $?
-   # echo 打印的空行
-6  # return 6 是函数中最后执行的命令
+return [n]
 ```
 
-**表达式:** 使用 `((...))` 或 `let` 修饰的表达式的退出状态取决于表达式的值, 如果表达式的值为 `0` 则退出状态为 `1` ; 如果表达式的值为非零, 则退出状态为 `0` .
+| 参数 | 说明 |
+|------|------|
+| `n` | 指定退出状态（0–255）；省略则为最后一条命令的退出状态 |
+
+**示例**：
 
 ```bash
-> let 0+0; echo $?
-1  # 表达式值为零
-> ((7-5)); echo $?
-0  # 表达式值非零
+myfunc() {
+    echo "hello"
+    return 5
+}
+
+myfunc; echo $?   # 5
+
+myfunc2() {
+    ls /nonexistent 2>/dev/null
+}
+
+myfunc2; echo $?  # 2（ls 返回的退出状态）
 ```
 
-**命令列表:** 用 `;` , `&` , `&&` , `||` 连接命令被称为命令列表, 其中用 `&&` 和 `||` 连接的命令使用左关联( `left associativity` )模式执行列表中的命令. 整个命令列表的退出状态为最后一条命令的退出状态. 此外, `$( LISTS )` 以及流程控制结构如: `for` , `while` 等的返回状态也是结构中的命令列表的退出状态。
+> **注意**：`return` 只能在函数或 `source` 执行的脚本中使用，在非 `source` 执行的脚本中使用 `return` 会报错。
+
+### 表达式
+
+#### 算术表达式 `((...))`
+
+算术表达式的退出状态基于表达式的求值结果：
+
+| 求值结果 | 退出状态 | 说明 |
+|---------|---------|------|
+| 非零 | `0`（成功） | 表达式为真 |
+| 零 | `1`（失败） | 表达式为假 |
 
 ```bash
-# 功能: 能ping通baidu.com则输出 `baidu.com is up`，否则输出 `baidu.com is down` 。
-> ping -c1 baidu.com &> /dev/null && echo 'baidu.com is up' || echo 'baidu.com is down'
-baidu.com is down
-> echo $?
-0  # 无论是否能 ping 通, 命令列表的退出状态都等于最后一条命令的退出状态
+((1+1)); echo $?    # 0  ← 结果为 2（非零）
+((1-1)); echo $?    # 1  ← 结果为 0
+((5>3)); echo $?    # 0  ← 5>3 为真，值为 1
+((3>5)); echo $?    # 1  ← 3>5 为假，值为 0
 ```
 
-**脚本:** 使用 `.` 或 `source` 运行脚本文件等同于在当前 `bash` 中执行代码块, 脚本中最后执行的命令的退出状态就是脚本的退出状态. 使用 `./脚本名` 或 `bash 脚本名` 的方式执行脚本文件等同于执行外部命令, 脚本的退出状态就是外部命令 `bash` 的退出状态. 如果脚本中最后执行的命令是 `exit` , 那么使用 `.` 或 `source` 执行该脚本文件在执行结束后会退出当前 `bash`。
+#### let 命令
 
-**后台作业与协作进程:** 使用不带选项的 `wait` 命令可以获得最后一个执行完毕的后台作业的退出状态, 如果使用 `wait -n <jobsec>` 可以获得指定后台作业的退出状态, 如果作业不存在则退出状态为 `127` . 使用 `coproc` 在 `sub shell` 中执行的命令的退出状态和后台作业一样可以被 `wait` 获取, `coproc` 自身的退出状态始终为 `0`。
+`let` 的退出状态与 `((...))` 相同。
+
+**语法**：
 
 ```bash
-> { sleep 10; aad; } &
-[1] 558
-> wait -n 1
-[1]+  Exit 127                { sleep 10; aad; }
-
-> coproc { sleep 10; aad; }
-[1] 558
-> echo $?
-0  # 这是 coproc 的执行结果
-> jobs
-[1]+  Exit 127                coproc COPROC { sleep 10; aad; }
+let 表达式 [表达式 ...]
 ```
-
-**管道命令:** 默认情况下, 管道的退出状态取决于管道中最后一条命令的退出状态. 如果设置了 `set -o pipefail` , 那么只有在管道中的全部命令的退出状态为 `0` 时, 整个管道的退出状态才为 `0` , 否则就是最后一个非零的退出状态. 在管道前添加 `!` 符号可以对整个管道的退出状态取反. `bash` 中的特殊变量 `$PIPESTATUS` 以数组的形式存储最近执行的前台管道的退出状态, 要注意的是单个命令也会被记录, 也就是说 `${PIPESTATUS[0]}` 和 `$?` 是等价的。
 
 ```bash
-# 管道的退出状态是最后一条命令的退出状态
-> ps | xxp 2>/dev/null | cat; echo $?
-0
-> set -o pipefail
-> ps | xxp 2>/dev/null | cat; echo $?
-127  # 设置了 pipefail 因此得到最后一个非零退出状态
-
-# 管道中每个命令的退出状态被按顺序记录在数组中
-> easd 2>/dev/null | ls /nou 2>/dev/null | more 2>/dev/null
-> echo ${PIPESTATUS[@]}
-127 2 0
-
-# 不带管道符号的单个命令也会被记录
-> ping asbasdasd 2>/dev/null; echo ${PIPESTATUS[0]}
-2
-> ping asbasdasd 2>/dev/null; echo $?
-2
+let a=1+1; echo $?   # 0  ← 结果为 2（非零）
+let a=1-1; echo $?   # 1  ← 结果为 0
 ```
+
+### 命令列表
+
+通过逻辑运算符组合命令时，退出状态为最后一条**被执行**的命令的退出状态：
+
+| 运算符 | 行为 | 退出状态 |
+|--------|------|---------|
+| `cmd1 && cmd2` | cmd1 成功才执行 cmd2 | 最后执行的命令的退出状态 |
+| `cmd1 || cmd2` | cmd1 失败才执行 cmd2 | 最后执行的命令的退出状态 |
+
+```bash
+true && echo "yes"   # yes（退出状态 0）
+false && echo "yes"  # 无输出（退出状态 1，cmd2 未执行）
+true || echo "no"    # 无输出（退出状态 0，cmd2 未执行）
+false || echo "no"   # no（退出状态 0）
+```
+
+**混合运算**：
+
+```bash
+true && false || echo "hello"
+# hello（true → 执行 false → 失败 → 执行 echo → 成功）
+
+false && true || echo "hello"
+# hello（false → 不执行 true → 执行 echo → 成功）
+```
+
+### 脚本的退出状态
+
+| 执行方式 | 退出状态来源 |
+|---------|------------|
+| `source script.sh` | 脚本中最后一条命令的退出状态，或 `return N` 指定的值 |
+| `./script.sh` / `bash script.sh` | 脚本中最后一条命令的退出状态，或 `exit N` 指定的值 |
+
+```bash
+# source 执行
+cat > t.sh << 'EOF'
+echo "hello"
+exit 5  # source 执行时，exit 会导致当前 Shell 退出
+EOF
+
+source t.sh
+# hello
+# 当前 Shell 直接退出（exit 在 source 中生效）
+
+# child-shell 执行
+bash t.sh
+echo $?  # 5
+```
+
+> **关键区别**：`source` 中的 `exit` 会终止当前 Shell；child-shell 中的 `exit` 仅终止子 Shell。
+
+### 后台作业与 wait
+
+**语法**：
+
+```bash
+wait [选项] [作业号或PID ...]
+```
+
+| 场景 | `$?` 值 |
+|------|--------|
+| `wait` 等待的后台作业正常退出 | 作业的退出状态 |
+| `wait` 等待的后台作业被信号终止 | `128 + 信号编号` |
+| `wait` 指定不存在的 PID | `127` |
+| 不使用 `wait` 直接检查 `$?` | 始终为 `0`（`&` 本身的退出状态） |
+
+```bash
+sleep 3 &     # $! = 1234
+wait 1234
+echo $?       # 0（正常退出）
+
+sleep 3 &
+kill -9 $!
+wait $!
+echo $?       # 137（被 SIGKILL 终止）
+
+wait 99999
+echo $?       # 127（PID 不存在）
+```
+
+### 管道的退出状态
+
+**默认行为**：管道的退出状态为**最后一个命令**的退出状态。
+
+```bash
+true | false; echo $?    # 1
+false | true; echo $?    # 0
+```
+
+**pipefail 选项**：开启后，管道的退出状态为最后一个**非零**退出状态的命令的值；如果所有命令都成功退出，则为 0。
+
+```bash
+set -o pipefail
+
+true | false | true; echo $?    # 1（false 的退出状态）
+false | true | true; echo $?    # 1（false 的退出状态）
+true | true | false; echo $?    # 1（false 的退出状态）
+true | true | true; echo $?     # 0（全部成功）
+```
+
+**PIPESTATUS 数组**：`PIPESTATUS` 数组记录管道中每个命令的退出状态。
+
+```bash
+true | false | true | false
+echo ${PIPESTATUS[@]}   # 0 1 0 1
+
+ls /nonexistent | cat | sort
+echo ${PIPESTATUS[@]}   # 2 0 0
+```
+
+> **注意**：`PIPESTATUS` 会在每次管道执行（甚至前台命令）后被重置。
+
+```bash
+ls /nonexistent | cat
+echo ${PIPESTATUS[@]}   # 2 0
+echo ${PIPESTATUS[@]}   # 0  ← 已被上一条 echo 重置
+```
+
+## 退出状态值约定
+
+### 常见退出状态码
+
+| 退出状态 | 含义 | 说明 |
+|---------|------|------|
+| `0` | 成功 | 命令执行成功 |
+| `1` | 一般错误 | 通用错误（如文件不存在、操作失败） |
+| `2` | 用法错误 | 命令参数不正确（Bash 内置命令约定） |
+| `126` | 不可执行 | 文件存在但无执行权限 |
+| `127` | 命令未找到 | 命令不在 PATH 中或不存在 |
+| `128+N` | 被信号终止 | 进程被信号 N 终止 |
+
+```bash
+# 不可执行
+chmod -x script.sh
+./script.sh; echo $?  # 126
+
+# 命令未找到
+nonexistent_cmd; echo $?  # 127
+```
+
+### 自定义退出状态码
+
+在脚本中可以使用 `exit N` 指定退出状态：
+
+```bash
+#!/bin/bash
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <filename>" >&2
+    exit 2  # 用法错误
+fi
+
+if [ ! -f "$1" ]; then
+    echo "Error: $1 not found" >&2
+    exit 1  # 一般错误
+fi
+
+echo "Processing $1..."
+exit 0  # 成功
+```
+
+> **建议**：在脚本中定义有意义的退出状态码，方便调用者根据退出状态判断错误类型。
+
+## 相关命令参考
+
+### exit 命令
+
+**语法**：
+
+```bash
+exit [n]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `n` | 指定退出状态码（0–255）；省略则为最后一条命令的退出状态 |
+
+**行为说明**：
+
+- 在脚本中：终止脚本并返回退出状态
+- 在交互式 Shell 中：退出当前 Shell
+- 在 `source` 执行的脚本中：终止当前 Shell
+
+### return 命令
+
+**语法**：
+
+```bash
+return [n]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `n` | 指定退出状态码（0–255）；省略则为函数中最后一条命令的退出状态 |
+
+**使用范围**：仅能在 Shell 函数或 `source` 执行的脚本中使用。
+
+### test / [ 命令
+
+`test` 和 `[` 用于条件判断，退出状态表示条件是否成立。
+
+**语法**：
+
+```bash
+test 表达式
+[ 表达式 ]
+[[ 表达式 ]]  # Bash 扩展版本
+```
+
+| 退出状态 | 含义 |
+|---------|------|
+| `0` | 条件为真 |
+| `1` | 条件为假 |
+| `2` | 表达式语法错误 |
+
+**常用条件表达式**：
+
+| 表达式 | 说明 |
+|--------|------|
+| `-f 文件` | 文件存在且为普通文件 |
+| `-d 文件` | 文件存在且为目录 |
+| `-e 文件` | 文件存在 |
+| `-r 文件` | 文件可读 |
+| `-w 文件` | 文件可写 |
+| `-x 文件` | 文件可执行 |
+| `-z 字符串` | 字符串长度为 0 |
+| `-n 字符串` | 字符串长度不为 0 |
+| `字符串1 = 字符串2` | 字符串相等 |
+| `数值1 -eq 数值2` | 数值相等 |
+| `数值1 -ne 数值2` | 数值不等 |
+| `数值1 -lt 数值2` | 数值1 < 数值2 |
+| `数值1 -gt 数值2` | 数值1 > 数值2 |
+
+### set 命令（退出状态相关）
+
+**语法**：
+
+```bash
+set [-e] [-o pipefail]
+```
+
+| 选项 | 说明 |
+|------|------|
+| `-e` | 任何命令返回非零退出状态时立即退出脚本 |
+| `-o pipefail` | 管道中任何命令失败时，管道返回该命令的退出状态 |
+
+**示例**：
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# -e: 命令失败时脚本立即退出
+# -u: 引用未定义变量时报错
+# -o pipefail: 管道中任何命令失败都会导致管道失败
+
+false | true  # 没有 pipefail 时退出状态为 0，有 pipefail 时为 1
+```
+
+> **注意**：`set -e` 对 `&&`、`||`、`if` 条件中的命令不生效，这些命令的失败不会导致脚本退出。
+
+## 最佳实践总结
+
+| 场景 | 推荐做法 | 示例 |
+|------|---------|------|
+| 检查命令是否成功 | 使用 `$?` 或 `if` / `&&` | `cmd && echo "ok"` |
+| 脚本中处理错误 | 使用 `set -e` + `set -o pipefail` | `set -euo pipefail` |
+| 区分错误类型 | 使用不同的退出状态码 | `exit 1` / `exit 2` |
+| 管道错误检测 | 使用 `PIPESTATUS` 数组 | `${PIPESTATUS[@]}` |
+| 函数返回状态 | 使用 `return` 而非 `exit` | `return 1` |
+| 获取管道各命令状态 | `PIPESTATUS` + `pipefail` | `set -o pipefail` |
+| 判断信号终止 | 检查退出状态是否 ≥ 128 | `if (( $? >= 128 ))` |

@@ -2,26 +2,26 @@
 
 ## Portainer
 
-Portainer是一款Docker可视化管理工具，允许我们在网页中方便的查看和管理Docker容器。
+Portainer 是一款 Docker 可视化管理工具，允许我们在网页中方便的查看和管理 Docker 容器。
 
 官方网站：https://www.portainer.io/
 
 下载镜像：
 
-```shell
+```sh
 docker pull portainer/portainer-ce
 ```
 
 创建数据卷：
 
-```shell
+```sh
 docker volume create portainer_data
 ```
 
-创建并运行portainer容器：
+创建并运行 portainer 容器：
 
-```shell
+```sh
 docker run -d -p 8000:8000 -p 9000:9000 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce
 ```
 
-访问 http://127.0.0.1:9000 对Docker进行管理。
+访问 http://127.0.0.1:9000 对 Docker 进行管理。

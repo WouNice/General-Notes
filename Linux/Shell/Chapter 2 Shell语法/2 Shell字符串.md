@@ -1,15 +1,15 @@
 # Shell字符串
 
-字符串是shell编程中常用的数据类型（除了数字和字符串，也没啥其它类型好用了），字符串可以用单引号，也可以用双引号，也可以不用引号。
+字符串是 shell 编程中常用的数据类型（除了数字和字符串，也没啥其它类型好用了），字符串可以用单引号，也可以用双引号，也可以不用引号。
 
 ## 单双引号的区别
 
 单双引号的区别：
 
-* 双引号里可以有变量，单引号则原样输出；
-* 双引号里可以出现转义字符，单引号则原样输出；
-* 单引号字串中不能出现单引号；
-* 单引号是不能识别变量，只会原样输出，单引号是不能转义的
+- 双引号里可以有变量，单引号则原样输出；
+- 双引号里可以出现转义字符，单引号则原样输出；
+- 单引号字串中不能出现单引号；
+- 单引号是不能识别变量，只会原样输出，单引号是不能转义的
 
 即：
 
@@ -18,7 +18,7 @@
 
 示例：
 
-```shell
+```bash
 name="tom"
 message='welcome ${name} !'
 echo $message
@@ -28,7 +28,7 @@ echo $message
 
 输出如下：
 
-```
+```bash
 welcome ${name} !
 welcom tom !
 ```
@@ -43,10 +43,10 @@ welcom tom !
 | \f       | 换页(FF)，将当前位置移到下页开头 |
 | \n       | 换行                             |
 | \r       | 回车                             |
-| \t       | 水平制表符（tab键）              |
+| \t       | 水平制表符（tab 键）              |
 | \v       | 垂直制表符                       |
 
-shell默认是不转义上面的字符的。需要加`-e`选项。
+shell 默认是不转义上面的字符的。需要加`-e`选项。
 
 举个例子：
 
@@ -88,7 +88,7 @@ echo $str1,$str2,$str3
 
 输出：
 
-```
+```bash
 i love you
 iloveyou
 i,love,you
@@ -100,9 +100,7 @@ i,love,you
 #!/bin/bash/
 
 str='i love you'
-
 echo ${#str}
-
 # 输出：10
 ```
 
@@ -112,7 +110,6 @@ echo ${#str}
 #!/bin/bash/
 
 str='i love you'
-
 echo ${str:1} # 从第1个截取到末尾。注意从0开始。
 echo ${str:2:2} # 从第2个截取2个。
 echo ${str:0} # 全部截取。
@@ -121,7 +118,7 @@ echo ${str:-3} # 负数无效，视为0。
 
 输出：
 
-```
+```bash
 love you
 lo
 i love you
@@ -144,7 +141,7 @@ echo `expr substr "$str" 1 6` #从字符串中位置1开始截取6个字符。�
 
 输出：
 
-```
+```text
 3
 4
 4
@@ -152,13 +149,13 @@ echo `expr substr "$str" 1 6` #从字符串中位置1开始截取6个字符。�
 i love
 ```
 
-注意字符串变量需要加双引号。第2个例子里`you`虽然`y`的index是8，但是`o`在前面已经出现过，index是4，最终取所有字符里最靠前的index。
+注意字符串变量需要加双引号。第 2 个例子里`you`虽然`y`的 index 是 8，但是`o`在前面已经出现过，index 是 4，最终取所有字符里最靠前的 index。
 
 ### 判断变量是否包含某个字符串
 
-方法一：利用grep查找
+方法一：利用 grep 查找
 
-```shell
+```bash
 strA="long string"
 strB="string"
 result=$(echo $strA | grep "${strB}")
@@ -170,11 +167,11 @@ else
 fi
 ```
 
-先打印长字符串，然后在长字符串中 grep 查找要搜索的字符串，用变量result记录结果，如果结果不为空，说明strA包含strB。如果结果为空，说明不包含。
+先打印长字符串，然后在长字符串中 grep 查找要搜索的字符串，用变量 result 记录结果，如果结果不为空，说明 strA 包含 strB。如果结果为空，说明不包含。
 
 方法二：利用字符串运算符
 
-```shell
+```bash
 strA="hello world"
 strB="hello"
 if [[ $strA =~ $strB ]]
@@ -185,11 +182,11 @@ else
 fi
 ```
 
-利用字符串运算符 =~ 直接判断strA是否包含strB。
+利用字符串运算符 =~ 直接判断 strA 是否包含 strB。
 
 方法三：利用通配符
 
-```shell
+```bash
 A="helloworld"
 B="hello"
 if [[ $A == *$B* ]]
@@ -200,13 +197,15 @@ else
 fi
 ```
 
-用通配符*号代理strA中非strB的部分，如果结果相等说明包含，反之不包含。
+用通配符*号代理 strA 中非 strB 的部分，如果结果相等说明包含，反之不包含。
 
-方法四：利用case in 语句
+方法四：利用 case in 语句
 
-```shell
+```bash
 thisString="1 2 3 4 5"	# 源字符串
+
 searchString="1 2"		# 搜索字符串
+
 case $thisString in
     *"$searchString"*) echo  "包含";;
     *) echo  "不包含" ;;
@@ -215,7 +214,7 @@ esac
 
 方法五：利用替换
 
-```shell
+```bash
 STRING_A="helloworld"
 STRING_B="hello"
 if [[ ${STRING_A/${STRING_B}//} == $STRING_A ]]
@@ -225,4 +224,3 @@ if [[ ${STRING_A/${STRING_B}//} == $STRING_A ]]
        echo  "包含"
     fi
 ```
-

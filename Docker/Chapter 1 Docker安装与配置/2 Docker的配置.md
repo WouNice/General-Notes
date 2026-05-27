@@ -6,7 +6,7 @@
 
 > 由于镜像服务可能出现宕机，建议同时配置多个镜像。
 
-```json
+```text
 {
     "registry-mirrors": [
         "https://dockercf.jsdelivr.fyi",
@@ -32,6 +32,6 @@
 镜像备用：
 
 -   [Docker Proxy 镜像加速](https://dockerproxy.link/)
--   [Docker镜像加速站](https://docker.melikeme.cn/)
+-   [Docker 镜像加速站](https://docker.melikeme.cn/)
 -   [CF-Workers-docker.io](https://github.com/cmliu/CF-Workers-docker.io)
--   [Dockerhub镜像加速说明](https://docker.zhai.cm/)
+-   [Dockerhub 镜像加速说明](https://docker.zhai.cm/)

@@ -4,7 +4,7 @@ Shell 是一种脚本语言。那么，就必须要有对应的解释器来执�
 
 `/etc/shells` 文件记录了系统上可使用的 shell 软件，使用 `cat` 命令查看该文件：
 
-```
+```bash
 # cat /etc/shells
 /bin/sh
 /bin/bash
@@ -30,4 +30,3 @@ bash 是 Linux 标准默认的 shell，具有以下的特色：
 sh 由 Steve Bourne 开发，是 Bourne Shell 的缩写，sh 是 Unix 标准默认的 shell。
 
 > 一般情况下，我们不区分bash和sh，比如`#!/bin/sh` 和 `#!/bin/bash`是一样的。
-
